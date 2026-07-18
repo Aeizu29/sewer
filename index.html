@@ -1,0 +1,294 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TXT vers images et site</title>
+<style>
+:root{color-scheme:dark;--panel:#151b27;--line:#2d384d;--text:#eef2ff;--muted:#9aa8bf;--accent:#7c9cff;--green:#45d49a}*{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#090d14,#111827);color:var(--text);font:15px system-ui,sans-serif;min-height:100vh}main{width:min(1100px,calc(100% - 28px));margin:28px auto 60px}h1{margin:0 0 8px;font-size:clamp(27px,4vw,42px)}p{color:var(--muted);line-height:1.55}.notice,.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:17px}.notice{background:#14213a;color:#dbe7ff;margin:18px 0}.grid{display:grid;grid-template-columns:1.1fr .9fr;gap:16px}@media(max-width:800px){.grid{grid-template-columns:1fr}}.drop{display:block;border:2px dashed #43516c;border-radius:14px;padding:25px;text-align:center;cursor:pointer;background:#0f1520}.drop:hover{border-color:var(--accent)}.drop input{display:none}#fileName{display:block;color:var(--green);margin-top:8px;word-break:break-all}.fields{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-top:14px}.full{grid-column:1/-1}@media(max-width:520px){.fields{grid-template-columns:1fr}.full{grid-column:auto}}label{display:grid;gap:6px;color:#cad4e4;font-size:13px}input,select,button{font:inherit}input[type=text],input[type=number],select{width:100%;padding:10px;border-radius:9px;border:1px solid #35425a;background:#0d131d;color:white}.check{display:flex;align-items:center;gap:8px}.check input{width:17px;height:17px}.buttons{display:flex;gap:9px;flex-wrap:wrap;margin-top:15px}button{padding:10px 13px;border-radius:10px;border:1px solid #40506b;background:#202a3b;color:white;cursor:pointer;font-weight:700}button.primary{background:var(--accent);color:#07101f;border:0}button.good{background:var(--green);color:#061a13;border:0}button:disabled{opacity:.45;cursor:not-allowed}.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat{background:#0f1520;border:1px solid var(--line);padding:12px;border-radius:11px}.stat b{display:block;font-size:22px}.stat span{color:var(--muted);font-size:12px}progress{width:100%;height:16px;margin-top:16px}.status{min-height:24px;white-space:pre-wrap}.preview{display:grid;gap:10px;max-height:520px;overflow:auto}.preview article{background:#0d131d;border:1px solid var(--line);padding:8px;border-radius:11px}.preview img{width:100%;display:block;border-radius:7px}.preview small{display:block;color:var(--muted);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}code{background:#0a1019;padding:2px 5px;border-radius:5px}
+</style></head><body><main>
+<h1>TXT → Images intelligentes → Site</h1><p>Le texte est découpé comme dans ton script AHK : titres, chapitres et vraies fins de phrases deviennent des images distinctes.</p>
+<div class="notice">Le générateur crée un dossier de site contenant <code>index.html</code>, <code>links.txt</code> et le dossier <code>images</code>. Envoie ensuite le tout sur ton hébergeur pour obtenir des liens publics.</div>
+<div class="grid"><section class="card"><label class="drop">Choisir un gros fichier .txt<span id="fileName">Aucun fichier</span><input id="file" type="file" accept=".txt,text/plain"></label>
+<div class="fields"><label class="full">Adresse future du site, facultative<input id="baseUrl" type="text" placeholder="https://monsite.com/texte"></label><label>Largeur<input id="width" type="number" value="1200" min="300" max="5000"></label><label>Hauteur minimale<input id="minHeight" type="number" value="160" min="70" max="2000"></label><label>Taille du texte<input id="fontSize" type="number" value="34" min="10" max="150"></label><label>Marge<input id="padding" type="number" value="50" min="0" max="400"></label><label>Longueur maximale d’un bloc<input id="maxLength" type="number" value="450" min="80" max="5000"></label><label>Police<input id="font" type="text" value="Arial, sans-serif"></label><label>Alignement<select id="align"><option value="left">Gauche</option><option value="center">Centre</option><option value="right">Droite</option></select></label><label>Fond<input id="bg" type="color" value="#ffffff"></label><label>Texte<input id="fg" type="color" value="#111111"></label><label class="check"><input id="trim" type="checkbox" checked> Nettoyer les espaces parasites</label><label class="check"><input id="empty" type="checkbox" checked> Ignorer les blocs vides</label></div>
+<div class="buttons"><button id="analyze">Analyser</button><button id="previewBtn" disabled>Prévisualiser</button><button id="copyBtn" disabled>Copier les liens</button></div></section>
+<section class="card"><div class="stats"><div class="stat"><b id="count">0</b><span>blocs/images détectés</span></div><div class="stat"><b id="size">0</b><span>taille du TXT</span></div></div><div class="buttons"><button class="good" id="folderBtn" disabled>Créer le site dans un dossier</button><button id="cancelBtn" disabled>Annuler</button></div><progress id="progress" value="0" max="100"></progress><p class="status" id="status">Sélectionne un fichier.</p><p>Utilise Chrome ou Edge. Les images sont enregistrées progressivement, ce qui convient mieux aux gros fichiers.</p><div class="preview" id="preview"></div></section></div></main>
+<script>
+(()=>{"use strict";
+const $=id=>document.getElementById(id),state={file:null,lines:[],cancel:false,urls:[]},ids=["previewBtn","copyBtn","folderBtn"];
+function status(t,e=false){$("status").textContent=t;$("status").style.color=e?"#ff7786":"#9aa8bf"}function enabled(v){ids.forEach(id=>$(id).disabled=!v)}function bytes(n){return n<1024?n+" o":n<1048576?(n/1024).toFixed(1)+" Ko":(n/1048576).toFixed(1)+" Mo"}function clearPreview(){state.urls.forEach(URL.revokeObjectURL);state.urls=[];$("preview").replaceChildren()}
+$("file").addEventListener("change",e=>{state.file=e.target.files[0]||null;if(!state.file)return;$("fileName").textContent=state.file.name;$("size").textContent=bytes(state.file.size);$("count").textContent="0";state.lines=[];enabled(false);clearPreview();status("Clique sur « Analyser ».")});
+$("analyze").addEventListener("click",async()=>{
+  if(!state.file)return status("Choisis d’abord un fichier .txt.",true);
+  status("Analyse intelligente du texte…");
+  try{
+    let text=await state.file.text();
+    if($("trim").checked)text=text.replace(/[\t ]+/g," ");
+    let blocks=splitIntoPhrases(text,Math.max(80,+$("maxLength").value||450));
+    if($("empty").checked)blocks=blocks.filter(x=>x.trim());
+    state.lines=blocks;
+    $("count").textContent=blocks.length.toLocaleString("fr-FR");
+    enabled(blocks.length>0);
+    status(blocks.length
+      ? blocks.length.toLocaleString("fr-FR")+" bloc(s) intelligent(s) prêt(s)."
+      : "Aucun bloc exploitable trouvé.",!blocks.length);
+  }catch(err){
+    console.error(err);state.lines=[];enabled(false);status("Erreur d’analyse : "+err.message,true);
+  }
+});
+
+
+function splitIntoPhrases(input,maxLength=450){
+  let text=String(input||"")
+    .replace(/^\uFEFF/,"")
+    .replace(/\r\n?/g,"\n")
+    .replace(/\f/g,"\n\n")
+    .replace(/\u0007/g," ")
+    .replace(/\u00a0/g," ");
+
+  // Recolle uniquement les mots artificiellement coupés en fin de ligne.
+  text=text.replace(/([A-Za-zÀ-ÖØ-öø-ÿ])-\s*\n\s*([a-zà-öø-ÿ])/g,"$1$2");
+  text=text.replace(/[\t ]+/g," ").trim();
+  if(!text)return[];
+
+  const rawParagraphs=text.split(/\n[ \t]*\n+/);
+  let paragraphs=[];
+  for(const raw of rawParagraphs)appendLogicalBlocks(paragraphs,raw);
+  paragraphs=mergeChapterHeadingsWithTitles(paragraphs);
+
+  const phrases=[];
+  let headingBuffer="";
+  for(const paragraph of paragraphs){
+    if(isStructuralBoundaryBlock(paragraph)){
+      if(headingBuffer){splitParagraphIntelligently(phrases,headingBuffer,maxLength);headingBuffer=""}
+      splitParagraphIntelligently(phrases,paragraph,maxLength);
+      continue;
+    }
+    if(isHeadingLike(paragraph)){
+      headingBuffer=headingBuffer?headingBuffer+" "+paragraph:paragraph;
+      continue;
+    }
+    if(headingBuffer){splitParagraphIntelligently(phrases,headingBuffer,maxLength);headingBuffer=""}
+    splitParagraphIntelligently(phrases,paragraph,maxLength);
+  }
+  if(headingBuffer)splitParagraphIntelligently(phrases,headingBuffer,maxLength);
+  return phrases;
+}
+
+function mergeChapterHeadingsWithTitles(paragraphs){
+  const merged=[];
+  for(let i=0;i<paragraphs.length;){
+    const current=paragraphs[i];
+    if(isBareChapterHeading(current)&&i+1<paragraphs.length){
+      const candidate=paragraphs[i+1];
+      const following=i+2<paragraphs.length?paragraphs[i+2]:"";
+      if(isLikelyChapterTitle(candidate,following)){
+        merged.push(current+" "+candidate);i+=2;continue;
+      }
+    }
+    merged.push(current);i++;
+  }
+  return merged;
+}
+
+function isStructuralBoundaryBlock(text){
+  text=text.trim();
+  return /^(?:chapter|chapitre)\s+/i.test(text)||isHardSectionHeading(text);
+}
+
+function appendLogicalBlocks(paragraphs,rawParagraph){
+  let proseBuffer="",headingBuffer="";
+  const lines=rawParagraph.split("\n").map(x=>x.replace(/[\t ]+/g," ").trim()).filter(Boolean);
+
+  const flush=()=>{
+    if(headingBuffer){const h=normalizeBookParagraph(headingBuffer);if(h)paragraphs.push(h);headingBuffer=""}
+    if(proseBuffer){const p=normalizeBookParagraph(proseBuffer);if(p)paragraphs.push(p);proseBuffer=""}
+  };
+
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    if(isBareChapterHeading(line)){
+      flush();let block=line;
+      if(i+1<lines.length){
+        const candidate=lines[i+1],following=i+2<lines.length?lines[i+2]:"";
+        if(isLikelyChapterTitle(candidate,following)){block+=" "+candidate;i++}
+      }
+      paragraphs.push(normalizeBookParagraph(block));continue;
+    }
+    if(isCompleteChapterHeading(line)||isHardSectionHeading(line)){
+      flush();paragraphs.push(normalizeBookParagraph(line));continue;
+    }
+    if(isStandaloneHeadingLine(line)){
+      if(proseBuffer){const p=normalizeBookParagraph(proseBuffer);if(p)paragraphs.push(p);proseBuffer=""}
+      headingBuffer=headingBuffer?headingBuffer+" "+line:line;continue;
+    }
+    if(headingBuffer){paragraphs.push(normalizeBookParagraph(headingBuffer));headingBuffer=""}
+    proseBuffer=proseBuffer?proseBuffer+"\n"+line:line;
+  }
+  flush();
+}
+
+function chapterNumberPattern(){
+  return "(?:\\d{1,4}|[IVXLCDM]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)";
+}
+function isBareChapterHeading(text){
+  return new RegExp("^(?:chapter|chapitre)\\s+"+chapterNumberPattern()+"(?:\\s*[.:-])?$","i").test(text.trim());
+}
+function isCompleteChapterHeading(text){
+  text=text.trim();return /^(?:chapter|chapitre)\s+/i.test(text)&&!isBareChapterHeading(text);
+}
+function isHardSectionHeading(text){
+  return /^(?:prologue|epilogue|préface|preface|introduction|interlude|intermezzo|afterword|foreword)(?:\s*(?::|[-—–])\s*.+)?$/i.test(text.trim());
+}
+
+function isLikelyChapterTitle(text,followingLine=""){
+  text=text.trim();
+  if(!text||text.length>140||isBareChapterHeading(text)||isCompleteChapterHeading(text)||isHardSectionHeading(text))return false;
+  if(/[.!?…][»”’"')\]]*$/.test(text)||/^[—–-]|^[«“"']/.test(text))return false;
+
+  const words=text.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ0-9'’ -]/g," ").split(/\s+/).filter(Boolean);
+  if(!words.length||words.length>16)return false;
+  let important=0,capitalized=0,lowercase=0;
+  const small=/^(?:a|an|and|as|at|but|by|for|from|in|into|nor|of|on|or|the|to|up|with|à|au|aux|de|des|du|et|en|la|le|les|ou|par|pour|sur|un|une)$/i;
+  for(const word of words){
+    const letters=word.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ]/g,"");
+    if(!letters||small.test(letters))continue;
+    important++;
+    if(/^[A-ZÀ-ÖØ-Þ]/.test(letters))capitalized++;else lowercase++;
+  }
+  const lettersOnly=text.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ]/g,"");
+  if(lettersOnly&&lettersOnly.toUpperCase()===lettersOnly)return true;
+  if(important>0&&capitalized>=Math.ceil(important*.6)&&lowercase<=2)return true;
+
+  if(words.length<=6&&followingLine){
+    const followingStarts=/^[«“"'A-ZÀ-ÖØ-Þ]/.test(followingLine);
+    const followingEnds=/[.!?…]/.test(followingLine);
+    const narration=/^(?:he|she|they|i|we|you|it|there|this|that|il|elle|ils|elles|je|nous|vous|ce|cette|cela)\b/i.test(text);
+    if(followingStarts&&followingEnds&&!narration)return true;
+  }
+  return false;
+}
+
+function isStandaloneHeadingLine(text){
+  text=text.trim();return isHeadingLike(text)&&!/[!?…][»”’"')\]]*$/.test(text);
+}
+function normalizeBookParagraph(raw){
+  return raw.replace(/[ \t]*\n[ \t]*/g," ")
+    .replace(/[\t ]+/g," ")
+    .replace(/\s+([,;:!?])/g,"$1")
+    .replace(/\.\s*\.\s*\./g,"…")
+    .replace(/\s+([»”’])/g,"$1").trim();
+}
+function isHeadingLike(text){
+  text=text.trim();if(!text||text.length>180)return false;
+  if(/^(?:\d+|[IVXLCDM]+|[A-Z])(?:[.\-:])?$/i.test(text))return true;
+  if(/^(?:chapter|book|part|volume|vol\.?|section|prologue|epilogue|preface|introduction|interlude|appendix|act|scene|the end|end of)\b/i.test(text))return true;
+  const letters=text.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ]/g,"");
+  return !!letters&&letters.toUpperCase()===letters&&text.length<=160;
+}
+
+function splitParagraphIntelligently(out,paragraph,maxLength){
+  let start=0,pos=0;
+  const closers="»”’\\\"')]}";
+  while(pos<paragraph.length){
+    const ch=paragraph[pos];
+    if(!".!?…".includes(ch)){pos++;continue}
+    if(ch==="."&&isProtectedPeriod(paragraph,pos)){pos++;continue}
+
+    let punctEnd=pos;
+    while(punctEnd+1<paragraph.length&&".!?…".includes(paragraph[punctEnd+1]))punctEnd++;
+    let sentenceEnd=punctEnd;
+    while(sentenceEnd+1<paragraph.length&&closers.includes(paragraph[sentenceEnd+1]))sentenceEnd++;
+    const next=sentenceEnd+1;
+    if(next<paragraph.length&&!/\s/.test(paragraph[next])){pos=punctEnd+1;continue}
+    if(shouldKeepFollowingText(paragraph,start,pos,punctEnd,sentenceEnd)){pos=sentenceEnd+1;continue}
+
+    const phrase=paragraph.slice(start,sentenceEnd+1).trim();
+    if(phrase)addPhraseWithLengthLimit(out,phrase,maxLength);
+    start=next;while(start<paragraph.length&&/\s/.test(paragraph[start]))start++;
+    pos=start;
+  }
+  const remaining=paragraph.slice(start).trim();
+  if(remaining)addPhraseWithLengthLimit(out,remaining,maxLength);
+}
+
+function shouldKeepFollowingText(text,phraseStart,punctuationStart,punctuationEnd,sentenceEnd){
+  let next=sentenceEnd+1;while(next<text.length&&/\s/.test(text[next]))next++;
+  if(next>=text.length)return false;
+  const after=text.slice(next);
+  const m=after.match(/^[“”‘’"'([{]*([A-Za-zÀ-ÖØ-öø-ÿ]+)/);
+  if(!m)return false;
+  const nextWord=m[1],startsLower=/^[a-zà-öø-ÿ]/.test(nextWord);
+  const punctuation=text.slice(punctuationStart,punctuationEnd+1);
+  if((punctuation.includes("…")||punctuation.includes("..."))&&startsLower)return true;
+  if(punctuation[0]==="."&&startsLower)return true;
+  if(hasClosingQuote(text,punctuationEnd,sentenceEnd)&&isDialogueAttribution(after))return true;
+  return false;
+}
+function hasClosingQuote(text,punctuationEnd,sentenceEnd){
+  return sentenceEnd>punctuationEnd&&/["'»”’]/.test(text.slice(punctuationEnd+1,sentenceEnd+1));
+}
+function isDialogueAttribution(after){
+  return /^[“”‘’"'([{]*(?:(?:he|she|they|i|we|you|il|elle|ils|elles|je|nous|vous)\b|[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]*)\s+(?:said|asked|replied|answered|whispered|shouted|cried|murmured|continued|added|called|thought|wondered|exclaimed|remarked|observed|began|insisted|admitted|explained|suggested|demanded|ordered|laughed|sighed|muttered|snapped|yelled|screamed|told|dit|demanda|répondit|murmura|cria|ajouta|continua|souffla|chuchota|s'exclama|pensa)\b/i.test(after);
+}
+
+function isProtectedPeriod(text,pos){
+  const prev=pos>0?text[pos-1]:"",immediateNext=pos+1<text.length?text[pos+1]:"";
+  if(/\d/.test(prev)&&/\d/.test(immediateNext))return true;
+
+  let next=pos+1;while(next<text.length&&/\s/.test(text[next]))next++;
+  if(next>=text.length)return false;
+  const after=text.slice(next),nextChar=text[next];
+  const wm=after.match(/^[“”‘’"'([{]*([A-Za-zÀ-ÖØ-öø-ÿ]+)/),nextWord=wm?wm[1]:"";
+  const before=text.slice(Math.max(0,pos-80),pos+1);
+
+  if(/(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:Mr|Mrs|Ms|Miss|Mx|Dr|Prof|Rev|Fr|Capt|Cpt|Cmdr|Col|Gen|Lt|Sgt|Maj|Adm|Det|Insp|Supt|Gov|Pres|Sen|Rep|Amb|Sec|Treas|Assoc|Asst|Messrs|Mmes|Mme|Mlle|Mgr|Hon)\.$/i.test(before))return true;
+  if(/(?:^|[^A-Za-z])(?:e\.g|i\.e|viz|cf|vs|approx|dept|est|misc|resp|incl|excl|esp|aka)\.$/i.test(before))return true;
+
+  if(/(?:^|[^A-Za-z])(?:fig|eq|ref|no|nos|vol|chap|ch|sec|art|p|pp|ed|eds|trans)\.$/i.test(before)){
+    if(/[0-9a-zà-öø-ÿ]/.test(nextChar))return true;
+    if(/[A-ZÀ-ÖØ-Þ]/.test(nextChar)&&!isLikelySentenceStarter(nextWord))return true;
+  }
+  if(/(?:^|[^A-Za-z])(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)\.$/i.test(before)&&/\d/.test(nextChar))return true;
+
+  if(/(?:^|[^A-Za-z])(?:etc|al|ibid|Inc|Ltd|Co|Corp|Sr|Jr|Esq|St|Mt|Rd|Ave|Blvd|PhD|M\.D|D\.D\.S|B\.A|M\.A|B\.Sc)\.$/i.test(before)){
+    if(/[a-zà-öø-ÿ0-9]/.test(nextChar)||/[,;:]/.test(nextChar)||!isLikelySentenceStarter(nextWord))return true;
+  }
+  if(/(?:^|[^A-Za-z])(?:a|p)\.m\.$/i.test(before)){
+    if(/[a-zà-öø-ÿ0-9]/.test(nextChar)||!isLikelySentenceStarter(nextWord))return true;
+  }
+  if(/(?:^|[^A-Za-z])[A-ZÀ-ÖØ-Þ]\.$/.test(before)&&/[A-ZÀ-ÖØ-Þ]/.test(nextChar)&&!isLikelySentenceStarter(nextWord))return true;
+  if(/(?:^|[^A-Za-z])(?:[A-ZÀ-ÖØ-Þ]\.){2,}$/.test(before)){
+    if(/[a-zà-öø-ÿ0-9]/.test(nextChar)||!isLikelySentenceStarter(nextWord))return true;
+  }
+  if(/(?:^|[.!?]\s+|\b(?:chapter|book|part|section)\s+)(?:\d{1,4}|[IVXLCDM]+|[A-Z])\.$/i.test(before)&&/[A-ZÀ-ÖØ-Þ0-9]/.test(nextChar))return true;
+  return false;
+}
+function isLikelySentenceStarter(word){
+  return /^(?:A|An|And|After|As|At|Before|But|Chapter|During|Finally|For|He|Her|Here|His|However|I|If|In|It|Its|Meanwhile|Nevertheless|No|Now|Once|On|She|Since|So|Suddenly|That|The|Their|Then|There|These|They|This|Those|Thus|We|What|When|Where|Which|While|Who|Why|Yet|You|Il|Elle|Ils|Elles|Je|Nous|Vous|Le|La|Les|Un|Une|Des|Mais|Puis|Alors|Cependant)$/i.test(word||"");
+}
+function addPhraseWithLengthLimit(out,phrase,maxLength){
+  phrase=phrase.trim();
+  while(phrase.length>maxLength){
+    let cut=findSmartCutBefore(phrase,maxLength);if(cut<1)cut=maxLength;
+    const part=phrase.slice(0,cut).trim();if(part)out.push(part);
+    phrase=phrase.slice(cut).trim();
+  }
+  if(phrase)out.push(phrase);
+}
+function findSmartCutBefore(text,position){
+  const minimum=Math.floor(position*.55);
+  for(let i=position-1;i>=minimum;i--)if(";:—–,".includes(text[i]))return i+1;
+  for(let i=position-1;i>=0;i--)if(text[i]===" ")return i+1;
+  return 0;
+}
+
+function cfg(){return{width:Math.max(300,+$("width").value||1200),minHeight:Math.max(70,+$("minHeight").value||160),fontSize:Math.max(10,+$("fontSize").value||34),padding:Math.max(0,+$("padding").value||50),font:$("font").value||"Arial, sans-serif",align:$("align").value,bg:$("bg").value,fg:$("fg").value}}
+function wrap(ctx,text,max){const tokens=/\s/.test(text)?text.split(/(\s+)/).filter(Boolean):Array.from(text),lines=[];let current="";for(const token of tokens){const attempt=current+token;if(!current||ctx.measureText(attempt).width<=max){current=attempt;continue}lines.push(current.trimEnd());current=token.trimStart();if(ctx.measureText(current).width>max){let part="";for(const ch of current){if(part&&ctx.measureText(part+ch).width>max){lines.push(part);part=ch}else part+=ch}current=part}}if(current||!lines.length)lines.push(current.trimEnd());return lines}
+async function makeImage(text){const c=cfg(),canvas=document.createElement("canvas"),probe=canvas.getContext("2d");probe.font=c.fontSize+"px "+c.font;const max=Math.max(20,c.width-c.padding*2),lines=wrap(probe,text,max),lineH=Math.ceil(c.fontSize*1.4),height=Math.max(c.minHeight,c.padding*2+lines.length*lineH),scale=2;canvas.width=c.width*scale;canvas.height=height*scale;const ctx=canvas.getContext("2d");ctx.scale(scale,scale);ctx.fillStyle=c.bg;ctx.fillRect(0,0,c.width,height);ctx.fillStyle=c.fg;ctx.font=c.fontSize+"px "+c.font;ctx.textBaseline="middle";ctx.textAlign=c.align;let x=c.padding;if(c.align==="center")x=c.width/2;if(c.align==="right")x=c.width-c.padding;let y=(height-lines.length*lineH)/2+lineH/2;for(const line of lines){ctx.fillText(line,x,y,max);y+=lineH}return new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error("Image impossible à créer")),"image/png"))}
+function nameFor(i){const d=Math.max(6,String(state.lines.length).length);return"ligne-"+String(i+1).padStart(d,"0")+".png"}function linkFor(i){const base=$("baseUrl").value.trim().replace(/\/+$/,""),path="images/"+nameFor(i);return base?base+"/"+path:path}
+$("previewBtn").addEventListener("click",async()=>{clearPreview();const n=Math.min(15,state.lines.length);status("Création de l’aperçu…");for(let i=0;i<n;i++){const blob=await makeImage(state.lines[i]),url=URL.createObjectURL(blob);state.urls.push(url);const article=document.createElement("article"),img=document.createElement("img"),small=document.createElement("small");img.src=url;small.textContent=nameFor(i)+" — "+state.lines[i];article.append(img,small);$("preview").append(article)}status(n+" bloc(s) prévisualisé(s).")});
+$("copyBtn").addEventListener("click",async()=>{const text=state.lines.map((_,i)=>linkFor(i)).join("\n");try{await navigator.clipboard.writeText(text);status("Tous les liens prévus ont été copiés.")}catch{status("Le navigateur a bloqué le presse-papiers.",true)}});
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+function gallery(items,title){const cards=items.map(x=>`<article><a href="images/${x}" target="_blank"><img loading="lazy" src="images/${x}"></a><button data-url="images/${x}">Copier le lien</button></article>`).join("");return`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>*{box-sizing:border-box}body{margin:0;background:#0e1118;color:#fff;font-family:system-ui}header{position:sticky;top:0;background:#111827ee;padding:16px;border-bottom:1px solid #2e384b}main{width:min(1400px,calc(100% - 24px));margin:18px auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:13px}article{background:#171d29;border:1px solid #2e384b;border-radius:13px;padding:9px}img{display:block;width:100%;border-radius:8px}button{margin-top:8px;padding:8px;border:0;border-radius:8px;background:#7c9cff;font-weight:700;cursor:pointer}</style></head><body><header><h1>${esc(title)} — ${items.length} images</h1></header><main>${cards}</main><script>document.addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;await navigator.clipboard.writeText(new URL(b.dataset.url,location.href).href);b.textContent="Copié";setTimeout(()=>b.textContent="Copier le lien",900)});<\/script></body></html>`}
+async function writeFile(dir,name,data){const h=await dir.getFileHandle(name,{create:true}),w=await h.createWritable();await w.write(data);await w.close()}
+$("cancelBtn").addEventListener("click",()=>{state.cancel=true;status("Annulation demandée…")});
+$("folderBtn").addEventListener("click",async()=>{if(!window.showDirectoryPicker)return status("Utilise Chrome ou Edge récent pour choisir un dossier.",true);if(!state.lines.length)return;state.cancel=false;$("cancelBtn").disabled=false;enabled(false);$("progress").value=0;try{const root=await window.showDirectoryPicker({mode:"readwrite"}),images=await root.getDirectoryHandle("images",{create:true}),names=[],links=[];for(let i=0;i<state.lines.length;i++){if(state.cancel)throw new Error("CANCEL");const blob=await makeImage(state.lines[i]),name=nameFor(i);await writeFile(images,name,blob);names.push(name);links.push(linkFor(i));if(i%5===0||i===state.lines.length-1){$("progress").value=Math.round((i+1)/state.lines.length*100);status("Création : "+(i+1).toLocaleString("fr-FR")+" / "+state.lines.length.toLocaleString("fr-FR"));await new Promise(r=>setTimeout(r,0))}}const title=state.file.name.replace(/\.txt$/i,"");await writeFile(root,"index.html",gallery(names,title));await writeFile(root,"links.txt",links.join("\n"));await writeFile(root,"README.txt","Envoie index.html, links.txt et le dossier images sur le même hébergement.\n");status("Terminé : le site complet a été créé dans le dossier choisi.")}catch(err){if(err.message==="CANCEL")status("Export annulé.");else if(err.name==="AbortError")status("Choix du dossier annulé.");else status("Erreur : "+err.message,true)}finally{$("cancelBtn").disabled=true;enabled(state.lines.length>0)}});
+window.addEventListener("beforeunload",clearPreview);
+})();
+</script></body></html>
